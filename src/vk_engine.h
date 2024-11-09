@@ -30,6 +30,7 @@ public:
 
 	//draw loop
 	void draw();
+	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 
 	//run main loop
 	void run();
@@ -40,9 +41,12 @@ public:
 	void init_sync_structures();
 	void init_descriptors();
 	void init_pipelines();
+	void init_imgui();
 
 	void create_swapchain(uint32_t w, uint32_t h);
 	void destroy_swapchain();
+
+	void immediate_submit(std::function<void(VkCommandBuffer cmd)> && function);
 
 	DescriptorAllocator descriptorAllocator;
 
@@ -51,6 +55,11 @@ public:
 
 	VkPipeline		 gradientPipeline;
 	VkPipelineLayout gradientPipelineLayout;
+
+	VkFence			imFence;
+	VkCommandBuffer imCommandBuffer;
+	VkCommandPool   imCommandPool;
+
 
 	static VulkanEngine& Get();
 
