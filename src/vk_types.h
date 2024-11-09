@@ -20,6 +20,15 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 
+struct Texture
+{
+    VkImage       image;
+    VkImageView   imageView;
+    VmaAllocation allocation;
+    VkExtent3D    extent;
+    VkFormat      format;
+};
+
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \

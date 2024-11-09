@@ -4,18 +4,23 @@
 #pragma once
 
 #include <vk_types.h>
+#include "vk_descriptors.h"
+
+constexpr unsigned int FRAME_OVERLAP = 2;
+
+struct FrameData
+{
+	VkCommandPool   command_pool;
+	VkCommandBuffer cmd;
+
+	VkSemaphore swapchain_semaphore;
+	VkSemaphore render_semaphore;
+
+	VkFence		render_fence;
+};
 
 class VulkanEngine {
 public:
-
-	bool _isInitialized{ false };
-	int _frameNumber {0};
-	bool stop_rendering{ false };
-	VkExtent2D _windowExtent{ 1700 , 900 };
-
-	struct SDL_Window* _window{ nullptr };
-
-	static VulkanEngine& Get();
 
 	//initializes everything in the engine
 	void init();
@@ -28,4 +33,57 @@ public:
 
 	//run main loop
 	void run();
+
+	void init_vulkan();
+	void init_swapchain();
+	void init_commands();
+	void init_sync_structures();
+	void init_descriptors();
+	void init_pipelines();
+
+	void create_swapchain(uint32_t w, uint32_t h);
+	void destroy_swapchain();
+
+	DescriptorAllocator descriptorAllocator;
+
+	VkDescriptorSet	      drawImageDescriptorSet;
+	VkDescriptorSetLayout drawImageDescriptorLayout;
+
+	VkPipeline		 gradientPipeline;
+	VkPipelineLayout gradientPipelineLayout;
+
+	static VulkanEngine& Get();
+
+	bool       _isInitialized = false;
+	int        _frameNumber   = 0;
+	bool       stop_rendering = false;
+	VkExtent2D _windowExtent  = { 1280 , 720 };
+
+	VkInstance vk_instance;
+	VkDebugUtilsMessengerEXT debug_messanger;
+	VkPhysicalDevice         physical_device;
+	VkDevice				 device;
+	VkSurfaceKHR             surface;
+
+	VmaAllocator allocator;
+
+	VkSwapchainKHR swapchain;
+	VkFormat	   swapchain_format;
+
+	std::vector<VkImage>	 swapchain_images;
+	std::vector<VkImageView> swapchain_image_views;
+	VkExtent2D				 swapchain_extent;
+
+	Texture    drawImage;
+	VkExtent2D drawExtent;
+
+	FrameData	 frames[FRAME_OVERLAP];
+	unsigned int frame_count;
+
+	VkQueue  graphics_queue;
+	uint32_t graphics_queue_family;
+
+	FrameData& get_current_frame() { return frames[frame_count % FRAME_OVERLAP]; }
+
+	struct SDL_Window* _window{ nullptr };
 };
