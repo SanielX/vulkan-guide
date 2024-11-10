@@ -223,31 +223,71 @@ void VulkanEngine::init_pipelines()
     VkPipelineLayoutCreateInfo computeLayout{ .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pNext = nullptr };
     computeLayout.pSetLayouts    = &drawImageDescriptorLayout;
     computeLayout.setLayoutCount = 1;
+     
+    VkPushConstantRange pushConstants{};
+    pushConstants.offset = 0;
+    pushConstants.size = sizeof(ComputePushConstants);
+    pushConstants.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    computeLayout.pPushConstantRanges = &pushConstants;
+    computeLayout.pushConstantRangeCount = 1;
+
     vkCreatePipelineLayout(device, &computeLayout, nullptr, &gradientPipelineLayout);
 
     // Load compute shader
-    VkShaderModule computeDrawShader;
-    bool result = vkutil::load_shader_module("../../shaders/gradient.comp.spv", device, &computeDrawShader);
+    VkShaderModule gradientModule;
+    bool result = vkutil::load_shader_module("../../shaders/gradient_color.comp.spv", device, &gradientModule);
     if (!result) 
     {
         fmt::print("Error while loading compute shader gradient.comp");
         exit(-100);
     }
+
+    VkShaderModule skyModule;
+    /*bool*/ result = vkutil::load_shader_module("../../shaders/sky.comp.spv", device, &skyModule);
+    if (!result)
+    {
+        fmt::print("Error while loading compute shader sky.comp");
+        exit(-100);
+    }
+
     // Create shader stage from spir-v file by setting shader type and entry function name
     VkPipelineShaderStageCreateInfo stageInfo{ .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .pNext = nullptr };
     stageInfo.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = computeDrawShader;
+    stageInfo.module = gradientModule;
     stageInfo.pName  = "main";
+
     // Create pipeline, which is a combo of a shader and pipeline layout (descriptors+constants)
     VkComputePipelineCreateInfo computePipelineCreateInfo{ .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, .pNext = nullptr };
     computePipelineCreateInfo.layout = gradientPipelineLayout;
     computePipelineCreateInfo.stage  = stageInfo;
 
-    vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradientPipeline);
+    ComputeShader gradient;
+    gradient.pipeline_layout = gradientPipelineLayout;
+    gradient.name = "gradient";
+    gradient.data = {};
+    gradient.data.data1 = glm::vec4(1, 1, 0, 0);
+    gradient.data.data2 = glm::vec4(0, 1, 1, 0);
+    
+    vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradient.pipeline);
+
+    computePipelineCreateInfo.stage.module = skyModule;
+
+    ComputeShader sky;
+    sky.pipeline_layout = gradientPipelineLayout;
+    sky.name = "sky";
+    sky.data = {};
+    sky.data.data1 = glm::vec4(0.1, 0.2, 0.4f, 0.97f);
+
+    vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &sky.pipeline);
+
+    backgroundShaders.push_back(gradient);
+    backgroundShaders.push_back(sky);
+
+    vkDestroyShaderModule(device, gradientModule, nullptr);
+    vkDestroyShaderModule(device, skyModule,      nullptr);
 
     /* Pretend to clean up
-    vkDestroyShaderModule(_device, computeDrawShader, nullptr);
-
 	_mainDeletionQueue.push_function([&]() {
 		vkDestroyPipelineLayout(_device, _gradientPipelineLayout, nullptr);
 		vkDestroyPipeline(_device, _gradientPipeline, nullptr);
@@ -411,8 +451,13 @@ void VulkanEngine::draw()
     // VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
     // vkCmdClearColorImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipelineLayout, /*first set*/ 0, /*set count*/1, &drawImageDescriptorSet, 0, nullptr);
+    ComputeShader& currentShader = backgroundShaders[currentBackgroundShader];
+
+    vkCmdBindPipeline      (cmd, VK_PIPELINE_BIND_POINT_COMPUTE, currentShader.pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, currentShader.pipeline_layout, /*first set*/ 0, /*set count*/1, &drawImageDescriptorSet, 0, nullptr);
+
+    vkCmdPushConstants(cmd, gradientPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &currentShader.data);
+
     vkCmdDispatch(cmd, std::ceil(drawExtent.width / 16.0), std::ceil(drawExtent.height / 16.0), 1);
 
     vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL,   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -519,6 +564,16 @@ void VulkanEngine::run()
         ImGui::NewFrame();
 
         ImGui::ShowDemoWindow();
+
+        ImGui::Begin("Background");
+
+        ImGui::SliderInt("Effect", &currentBackgroundShader, 0, 1);
+        ImGui::ColorEdit4("Color 0", &backgroundShaders[currentBackgroundShader].data.data1.x);
+        ImGui::ColorEdit4("Color 1", &backgroundShaders[currentBackgroundShader].data.data2.x);
+        ImGui::ColorEdit4("Color 2", &backgroundShaders[currentBackgroundShader].data.data3.x);
+        ImGui::ColorEdit4("Color 3", &backgroundShaders[currentBackgroundShader].data.data4.x);
+
+        ImGui::End();
 
         ImGui::Render();
 

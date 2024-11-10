@@ -19,6 +19,24 @@ struct FrameData
 	VkFence		render_fence;
 };
 
+struct ComputePushConstants
+{
+	glm::vec4 data1;
+	glm::vec4 data2;
+	glm::vec4 data3;
+	glm::vec4 data4;
+};
+
+struct ComputeShader
+{
+	const char* name;
+
+	VkPipeline		 pipeline;
+	VkPipelineLayout pipeline_layout;
+
+	ComputePushConstants data;
+};
+
 class VulkanEngine {
 public:
 
@@ -60,6 +78,8 @@ public:
 	VkCommandBuffer imCommandBuffer;
 	VkCommandPool   imCommandPool;
 
+	std::vector<ComputeShader> backgroundShaders;
+	int currentBackgroundShader = 0;
 
 	static VulkanEngine& Get();
 
