@@ -48,6 +48,7 @@ void VulkanEngine::init()
     init_descriptors();
     init_pipelines();
     init_imgui();
+    init_triangle_pipeline();
 
     // everything went fine
     _isInitialized = true;
@@ -295,6 +296,42 @@ void VulkanEngine::init_pipelines()
     */
 }
 
+void VulkanEngine::init_triangle_pipeline()
+{
+    VkShaderModule fragModule;
+    bool result = vkutil::load_shader_module("../../shaders/colored_triangle.frag.spv", device, &fragModule);
+    if (!result) throw std::exception("Failed to load colored_triangle.frag");
+
+    VkShaderModule vertModule;
+    result = vkutil::load_shader_module("../../shaders/colored_triangle.vert.spv", device, &vertModule);
+    if (!result) throw std::exception("Failed to load colored_triangle.vert.spv");
+
+    VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
+    vkCreatePipelineLayout(device, &pipeline_layout_info, nullptr, &trianglePipelineLayout);
+
+    vkutil::GraphicsPipelineBuilder builder;
+    vkutil::GraphicsPipelineBuilder::create(&builder);
+
+    builder.pipelineLayout = trianglePipelineLayout;
+    builder.set_shaders(vertModule, fragModule);
+    builder.set_cull_mode(VK_CULL_MODE_BACK_BIT);
+    builder.disable_depth_test();
+    builder.set_color_attachment_format(drawImage.format);
+    builder.set_depth_format(VK_FORMAT_UNDEFINED);
+    builder.set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+
+    trianglePipeline = builder.build_pipeline(device);
+
+    vkDestroyShaderModule(device, fragModule, nullptr);
+    vkDestroyShaderModule(device, vertModule, nullptr);
+    /* pretend to clean up
+    _mainDeletionQueue.push_function([&]() {
+		vkDestroyPipelineLayout(_device, _trianglePipelineLayout, nullptr);
+		vkDestroyPipeline(_device, _trianglePipeline, nullptr);
+	});
+    */
+}
+
 void VulkanEngine::init_imgui()
 {
     VkDescriptorPoolSize pool_sizes[] = { 
@@ -421,6 +458,36 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& f
     vkWaitForFences(device, 1, &imFence, true, 9999999999);
 }
 
+void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
+{
+    // Info about image attachment (image view + current layout + load/store OP)
+    VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    // Defines which color+depth+stencil images are bounds to the graphics pipeline
+    VkRenderingInfo renderInfo = vkinit::rendering_info(drawExtent, &colorAttachment, nullptr);
+
+    vkCmdBeginRendering(cmd, &renderInfo);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+
+    VkViewport viewport{};
+    viewport.width  = drawExtent.width;
+    viewport.height = drawExtent.height;
+    viewport.minDepth = 0.f;
+    viewport.maxDepth = 1.f;
+
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.extent.width  = drawExtent.width;
+    scissor.extent.height = drawExtent.height;
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    // cmd, vertex count, instance count, first vertex, first index
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    vkCmdEndRendering(cmd);
+}
+
 void VulkanEngine::draw()
 {
     const uint32_t one_second = 1000000000;
@@ -460,7 +527,11 @@ void VulkanEngine::draw()
 
     vkCmdDispatch(cmd, std::ceil(drawExtent.width / 16.0), std::ceil(drawExtent.height / 16.0), 1);
 
-    vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL,   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    draw_hello_triangle(cmd);
+
+    vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     vkutil::transition_image(cmd, swapchainTarget, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     vkutil::blit_image(cmd, drawImage.image, swapchainTarget, drawExtent, swapchain_extent);
 
@@ -564,7 +635,7 @@ void VulkanEngine::run()
         ImGui::NewFrame();
 
         ImGui::ShowDemoWindow();
-
+        
         ImGui::Begin("Background");
 
         ImGui::SliderInt("Effect", &currentBackgroundShader, 0, 1);

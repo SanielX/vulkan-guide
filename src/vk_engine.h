@@ -59,6 +59,7 @@ public:
 	void init_sync_structures();
 	void init_descriptors();
 	void init_pipelines();
+	void init_triangle_pipeline();
 	void init_imgui();
 
 	void create_swapchain(uint32_t w, uint32_t h);
@@ -66,7 +67,12 @@ public:
 
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)> && function);
 
+	void draw_hello_triangle(VkCommandBuffer cmd);
+
 	DescriptorAllocator descriptorAllocator;
+
+	VkPipelineLayout trianglePipelineLayout;
+	VkPipeline trianglePipeline;
 
 	VkDescriptorSet	      drawImageDescriptorSet;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
