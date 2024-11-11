@@ -59,11 +59,17 @@ public:
 	void init_sync_structures();
 	void init_descriptors();
 	void init_pipelines();
+	void init_mesh_pipelines();
 	void init_triangle_pipeline();
 	void init_imgui();
 
 	void create_swapchain(uint32_t w, uint32_t h);
 	void destroy_swapchain();
+
+	GraphicsBuffer create_graphics_buffer(size_t allocSize, VkBufferUsageFlags usageFlags, VmaMemoryUsage memoryUsage);
+	void		   destroy_graphics_buffer(GraphicsBuffer *buffer);
+
+	GPUMeshBuffers create_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)> && function);
 
@@ -73,6 +79,10 @@ public:
 
 	VkPipelineLayout trianglePipelineLayout;
 	VkPipeline trianglePipeline;
+
+	VkPipelineLayout meshPipelineLayout;
+	VkPipeline       meshPipeline;
+	GPUMeshBuffers   rectangle;
 
 	VkDescriptorSet	      drawImageDescriptorSet;
 	VkDescriptorSetLayout drawImageDescriptorLayout;

@@ -29,6 +29,36 @@ struct Texture
     VkFormat      format;
 };
 
+struct GraphicsBuffer
+{
+    VkBuffer          buffer;
+    VmaAllocation     allocation;
+    VmaAllocationInfo allocInfo;
+};
+
+struct Vertex
+{
+    glm::vec3 position;
+    float uv_x;
+    
+    glm::vec3 normal;
+    float uv_y;
+
+    glm::vec4 color;
+};
+
+struct GPUMeshBuffers
+{
+    GraphicsBuffer  indexBuffer;
+    GraphicsBuffer  vertexBuffer;
+    VkDeviceAddress vertexBufferAddress;
+};
+
+struct MeshDrawPushConstants
+{
+    glm::mat4       worldMatrix;
+    VkDeviceAddress vertexBuffer;
+};
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \
