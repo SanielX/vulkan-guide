@@ -24,6 +24,7 @@ layout(buffer_reference, std430) readonly buffer VertexBuffer
 layout(push_constant) uniform constants 
 {
 	mat4 		 render_matrix;
+	mat4 		 model_matrix;
 	VertexBuffer vertexBuffer;
 } PushConstants;
 
@@ -31,7 +32,8 @@ void main()
 {
     Vertex v = PushConstants.vertexBuffer.vertices[gl_VertexIndex];
 
-    gl_Position = PushConstants.render_matrix * vec4(v.position, 1.0);
+    vec4 worldVertex  = PushConstants.model_matrix * vec4(v.position, 1.0);
+    gl_Position = PushConstants.render_matrix * worldVertex;
     outColor = v.color.xyz;
     outUV.xy = vec2(v.uv_x, v.uv_y);
 }

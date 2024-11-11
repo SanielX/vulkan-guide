@@ -19,6 +19,7 @@
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
+#include <glm/common.hpp>
 
 struct Texture
 {
@@ -57,6 +58,7 @@ struct GPUMeshBuffers
 struct MeshDrawPushConstants
 {
     glm::mat4       worldMatrix;
+    glm::mat4       modelMatrix;
     VkDeviceAddress vertexBuffer;
 };
 

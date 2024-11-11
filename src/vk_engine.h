@@ -5,6 +5,7 @@
 
 #include <vk_types.h>
 #include "vk_descriptors.h"
+#include "vk_loader.h"
 
 constexpr unsigned int FRAME_OVERLAP = 2;
 
@@ -84,6 +85,13 @@ public:
 	VkPipeline       meshPipeline;
 	GPUMeshBuffers   rectangle;
 
+	std::vector<std::shared_ptr<Mesh>> testMeshes;
+	int   currentMesh = 0;
+	float meshRotateAngle = 0;
+	glm::vec3 meshPosition = {};
+	glm::vec3 meshScale    = {1,1,1};
+	glm::mat4 modelMatrix;
+
 	VkDescriptorSet	      drawImageDescriptorSet;
 	VkDescriptorSetLayout drawImageDescriptorLayout;
 
@@ -120,6 +128,7 @@ public:
 	VkExtent2D				 swapchain_extent;
 
 	Texture    drawImage;
+	Texture    drawDepthBuffer;
 	VkExtent2D drawExtent;
 
 	FrameData	 frames[FRAME_OVERLAP];

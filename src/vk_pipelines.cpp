@@ -94,6 +94,18 @@ void vkutil::GraphicsPipelineBuilder::disable_depth_test()
 	depthStencil.maxDepthBounds = 1;
 }
 
+void vkutil::GraphicsPipelineBuilder::set_depth_test()
+{
+	depthStencil.depthTestEnable       = VK_TRUE;
+	depthStencil.depthCompareOp		   = VK_COMPARE_OP_GREATER_OR_EQUAL;
+	depthStencil.depthWriteEnable      = VK_TRUE;
+	depthStencil.depthBoundsTestEnable = VK_TRUE;
+
+	depthStencil.minDepthBounds = 0.f;
+	depthStencil.maxDepthBounds = 1.f;
+	set_cull_mode(VK_CULL_MODE_FRONT_BIT);
+}
+
 void vkutil::GraphicsPipelineBuilder::clear()
 {
 	inputAssembly        = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };

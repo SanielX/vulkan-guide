@@ -1,7 +1,10 @@
 ﻿//> includes
 #define VMA_IMPLEMENTATION
 #include "vk_engine.h"
+#include "vk_loader.h"
 
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/transform.hpp>
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
@@ -50,6 +53,8 @@ void VulkanEngine::init()
     init_imgui();
     init_triangle_pipeline();
     init_mesh_pipelines();
+
+    testMeshes = loadGltfMeshes(this, "../../assets/basicmesh.glb").value();
 
     std::array<Vertex, 4> rect_vertices;
     rect_vertices[0].position = { 0.5-0.5, -0.5+.5, 0 };
@@ -157,6 +162,18 @@ void VulkanEngine::init_swapchain()
 
     VkImageViewCreateInfo view_info = vkinit::imageview_create_info(drawImage.format, drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
     vkCreateImageView(device, &view_info, nullptr, &drawImage.imageView);
+
+    drawDepthBuffer.format = VK_FORMAT_D32_SFLOAT;
+    VkImageUsageFlags drawDepthUsageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |    // Can copy from this image
+                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT |    // Can copy into this image
+                                            VK_IMAGE_USAGE_STORAGE_BIT |         // Can write to in compute shaders
+                                            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; 
+    VkImageCreateInfo depth_image_info = vkinit::image_create_info(drawDepthBuffer.format, drawDepthUsageFlags, drawImageExtent);
+
+    vmaCreateImage(allocator, &depth_image_info, &img_allocInfo, &drawDepthBuffer.image, &drawDepthBuffer.allocation, nullptr);
+
+    view_info = vkinit::imageview_create_info(drawDepthBuffer.format, drawDepthBuffer.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+    vkCreateImageView(device, &view_info, nullptr, &drawDepthBuffer.imageView);
 
     drawExtent = { .width = (uint32_t)w, .height = (uint32_t)h };
 }
@@ -344,9 +361,9 @@ void VulkanEngine::init_mesh_pipelines()
 
     builder.pipelineLayout = meshPipelineLayout;
     builder.set_shaders(vertModule, fragModule);
-    builder.disable_depth_test();
+    builder.set_depth_test();
     builder.set_color_attachment_format(drawImage.format);
-    builder.set_depth_format(VK_FORMAT_UNDEFINED);
+    builder.set_depth_format(drawDepthBuffer.format);
     builder.set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
     meshPipeline = builder.build_pipeline(device);
@@ -522,7 +539,7 @@ GPUMeshBuffers VulkanEngine::create_mesh(std::span<uint32_t> indices, std::span<
     GPUMeshBuffers buffers;
 
     const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
-    const size_t indexBufferSize  = indices.size()  * sizeof(Vertex);
+    const size_t indexBufferSize  = indices.size()  * sizeof(uint32_t);
 
     GPUMeshBuffers newSurface;
     newSurface.vertexBuffer = create_graphics_buffer(vertexBufferSize, 
@@ -585,14 +602,18 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& f
 void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
 {
     // Info about image attachment (image view + current layout + load/store OP)
-    VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(drawImage.imageView, /*clear*/ nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(drawDepthBuffer.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     // Defines which color+depth+stencil images are bounds to the graphics pipeline
-    VkRenderingInfo renderInfo = vkinit::rendering_info(drawExtent, &colorAttachment, nullptr);
+    VkRenderingInfo renderInfo = vkinit::rendering_info(drawExtent, &colorAttachment, &depthAttachment);
 
     vkCmdBeginRendering(cmd, &renderInfo);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+  /*  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
 
+    // cmd, vertex count, instance count, first vertex, first index
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+  */
     VkViewport viewport{};
     viewport.width  = drawExtent.width;
     viewport.height = drawExtent.height;
@@ -606,19 +627,23 @@ void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
     scissor.extent.height = drawExtent.height;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // cmd, vertex count, instance count, first vertex, first index
-    vkCmdDraw(cmd, 3, 1, 0, 0);
-
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
+    Mesh* targetMesh = testMeshes[currentMesh].get();
+
     MeshDrawPushConstants meshConstants;
-    meshConstants.worldMatrix  = glm::mat4{ 1.f };
-    meshConstants.vertexBuffer = rectangle.vertexBufferAddress;
+     
+    glm::mat4 view = glm::translate  (glm::identity<glm::mat4>(), glm::vec3{ 0, 0, -5.f });
+    glm::mat4 proj = glm::perspective(glm::radians(70.f), (float)drawExtent.width / float(drawExtent.height), 1000.f, 0.1f);
+    proj[1][1] *= -1;
+    meshConstants.modelMatrix  = modelMatrix;
+    meshConstants.worldMatrix  = proj*view;
+    meshConstants.vertexBuffer = targetMesh->meshBuffers.vertexBufferAddress;
 
     vkCmdPushConstants(cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshDrawPushConstants), &meshConstants);
-    vkCmdBindIndexBuffer(cmd, rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(cmd, targetMesh->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-    vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, targetMesh->surfaces[0].count, 1, targetMesh->surfaces[0].startIndex, 0, 0);
 
     vkCmdEndRendering(cmd);
 }
@@ -664,6 +689,22 @@ void VulkanEngine::draw()
 
     vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
+    vkutil::transition_image_depth(cmd, drawDepthBuffer.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    VkClearDepthStencilValue clearDepth{};
+    clearDepth.depth   = 0.0;
+    clearDepth.stencil = 0.0;
+
+    VkImageSubresourceRange depthClearRange{};
+    depthClearRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depthClearRange.layerCount = 1;
+    depthClearRange.levelCount = 1;
+
+    vkCmdClearDepthStencilImage(cmd, drawDepthBuffer.image, VK_IMAGE_LAYOUT_GENERAL, &clearDepth, 1, &depthClearRange);
+
+
+    vkutil::transition_image_depth(cmd, drawDepthBuffer.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
     draw_hello_triangle(cmd);
 
     vkutil::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -685,7 +726,7 @@ void VulkanEngine::draw()
 
     VkCommandBufferSubmitInfo cmdinfo = vkinit::command_buffer_submit_info(cmd);
 
-    VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame().swapchain_semaphore);
+    VkSemaphoreSubmitInfo waitInfo   = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame().swapchain_semaphore);
     VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame().render_semaphore);
 
     VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, &signalInfo, &waitInfo);
@@ -726,6 +767,8 @@ void VulkanEngine::draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView)
 
     vkCmdEndRendering(cmd);
 }
+
+void TRS(glm::vec3 t, glm::quat r, glm::vec3 s, glm::mat4& res);
 
 void VulkanEngine::run()
 {
@@ -778,11 +821,42 @@ void VulkanEngine::run()
         ImGui::ColorEdit4("Color 1", &backgroundShaders[currentBackgroundShader].data.data2.x);
         ImGui::ColorEdit4("Color 2", &backgroundShaders[currentBackgroundShader].data.data3.x);
         ImGui::ColorEdit4("Color 3", &backgroundShaders[currentBackgroundShader].data.data4.x);
+        ImGui::Spacing();
+        ImGui::SliderInt("Mesh", &currentMesh, 0, 2);
+        ImGui::DragFloat3("Position", &meshPosition.x);
+        ImGui::DragFloat3("Scale",    &meshScale.x);
 
         ImGui::End();
 
         ImGui::Render();
 
+        meshRotateAngle += 1.0f / 60.0f;
+
+        glm::quat rotation = glm::normalize(glm::angleAxis(meshRotateAngle, glm::vec3(0, 1, 0)));
+        TRS(meshPosition, rotation, meshScale, modelMatrix);
+
         draw();
     }
+}
+
+void TRS(glm::vec3 t, glm::quat r, glm::vec3 s, glm::mat4& res)
+{
+    float m11 = (1.0f - 2.0f * (r.y * r.y + r.z * r.z)) * s.x;
+    float m21 = (r.x * r.y + r.z * r.w) * s.x * 2.0f;
+    float m31 = (r.x * r.z - r.y * r.w) * s.x * 2.0f;
+    float m41 = 0.0f;
+    float m12 = (r.x * r.y - r.z * r.w) * s.y * 2.0f;
+    float m22 = (1.0f - 2.0f * (r.x * r.x + r.z * r.z)) * s.y;
+    float m32 = (r.y * r.z + r.x * r.w) * s.y * 2.0f;
+    float m42 = 0.0f;
+    float m13 = (r.x * r.z + r.y * r.w) * s.z * 2.0f;
+    float m23 = (r.y * r.z - r.x * r.w) * s.z * 2.0f;
+    float m33 = (1.0f - 2.0f * (r.x * r.x + r.y * r.y)) * s.z;
+    float m43 = 0.0f;
+    float m14 = t.x;
+    float m24 = t.y;
+    float m34 = t.z;
+    float m44 = 1.0f;
+
+    res = glm::transpose(glm::mat4{ m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44 });
 }
