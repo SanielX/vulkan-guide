@@ -34,7 +34,7 @@ void VulkanEngine::init()
     // We initialize SDL and create a window with it.
     SDL_Init(SDL_INIT_VIDEO);
 
-    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN);
+    SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
     _window = SDL_CreateWindow(
         "VkGuide App",
@@ -365,6 +365,7 @@ void VulkanEngine::init_mesh_pipelines()
     builder.set_color_attachment_format(drawImage.format);
     builder.set_depth_format(drawDepthBuffer.format);
     builder.set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    builder.set_alpha_blend(VK_BLEND_OP_ADD, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
 
     meshPipeline = builder.build_pipeline(device);
 
@@ -483,6 +484,16 @@ void VulkanEngine::cleanup()
 
     // clear engine pointer
     loadedEngine = nullptr;
+}
+
+void VulkanEngine::resize_swapchain(uint32_t w, uint32_t h)
+{
+    vkDeviceWaitIdle(device);
+
+    destroy_swapchain();
+    create_swapchain(w, h);
+
+    _swapChainNeedsResize = false;
 }
 
 void VulkanEngine::create_swapchain(uint32_t w, uint32_t h)
@@ -650,6 +661,9 @@ void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
 
 void VulkanEngine::draw()
 {
+    drawExtent.width  = std::min(swapchain_extent.width,  drawImage.extent.width);
+    drawExtent.height = std::min(swapchain_extent.height, drawImage.extent.height);
+
     const uint32_t one_second = 1000000000;
     FrameData& frame = get_current_frame();
 
@@ -657,7 +671,12 @@ void VulkanEngine::draw()
     VK_CHECK(vkResetFences  (device, 1, &frame.render_fence));
 
     uint32_t swapchainImageIndex;
-    vkAcquireNextImageKHR(device, swapchain, one_second, frame.swapchain_semaphore, nullptr, &swapchainImageIndex);
+    VkResult swapChainResult = vkAcquireNextImageKHR(device, swapchain, one_second, frame.swapchain_semaphore, nullptr, &swapchainImageIndex);
+    if (swapChainResult == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        _swapChainNeedsResize = true;
+        return;
+    }
 
     VkCommandBuffer cmd = frame.cmd;
     vkResetCommandBuffer(cmd, 0);
@@ -750,7 +769,11 @@ void VulkanEngine::draw()
 
     presentInfo.pImageIndices = &swapchainImageIndex;
 
-    VK_CHECK(vkQueuePresentKHR(graphics_queue, &presentInfo));
+    VkResult presentResult = vkQueuePresentKHR(graphics_queue, &presentInfo);
+    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        _swapChainNeedsResize = true;
+    }
 
     //increase the number of frames drawn
     _frameNumber++;
@@ -806,6 +829,14 @@ void VulkanEngine::run()
             // throttle the speed to avoid the endless spinning
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
+        }
+
+        if (_swapChainNeedsResize)
+        {
+            int w, h;
+            SDL_Vulkan_GetDrawableSize(_window, &w, &h);
+
+            resize_swapchain(w, h);
         }
 
         ImGui_ImplVulkan_NewFrame();

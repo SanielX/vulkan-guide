@@ -136,6 +136,21 @@ void vkutil::GraphicsPipelineBuilder::clear()
 	set_cull_mode(VK_CULL_MODE_BACK_BIT);
 }
 
+void vkutil::GraphicsPipelineBuilder::set_alpha_blend(VkBlendOp op, VkBlendFactor srcFactor = VK_BLEND_FACTOR_ONE, VkBlendFactor dstFactor = VK_BLEND_FACTOR_ZERO)
+{
+	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachment.blendEnable  = true;
+
+	colorBlendAttachment.alphaBlendOp = op;
+	colorBlendAttachment.colorBlendOp = op;
+
+	colorBlendAttachment.dstColorBlendFactor = dstFactor;
+	colorBlendAttachment.dstAlphaBlendFactor = dstFactor;
+
+	colorBlendAttachment.srcColorBlendFactor = srcFactor;
+	colorBlendAttachment.srcAlphaBlendFactor = srcFactor;
+}
+
 VkPipeline vkutil::GraphicsPipelineBuilder::build_pipeline(VkDevice device)
 {
 	VkPipelineViewportStateCreateInfo viewportState{ .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .pNext = nullptr };

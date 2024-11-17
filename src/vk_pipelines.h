@@ -29,6 +29,8 @@ namespace vkutil
 		void set_depth_test();
 		void clear();
 
+		void set_alpha_blend(VkBlendOp op, VkBlendFactor srcFactor, VkBlendFactor dstFactor);
+
 		VkPipeline build_pipeline(VkDevice device);
 	};
 

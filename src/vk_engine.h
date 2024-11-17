@@ -64,6 +64,7 @@ public:
 	void init_triangle_pipeline();
 	void init_imgui();
 
+	void resize_swapchain(uint32_t w, uint32_t h);
 	void create_swapchain(uint32_t w, uint32_t h);
 	void destroy_swapchain();
 
@@ -107,6 +108,7 @@ public:
 
 	static VulkanEngine& Get();
 
+	bool	   _swapChainNeedsResize = false;
 	bool       _isInitialized = false;
 	int        _frameNumber   = 0;
 	bool       stop_rendering = false;
