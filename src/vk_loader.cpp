@@ -132,3 +132,18 @@ std::optional<std::vector<std::shared_ptr<Mesh>>> loadGltfMeshes(VulkanEngine* e
 
 	return meshes;
 }
+
+
+void DeletionQueue::push(std::function<void()> func)
+{
+	queue.push_back(func);
+}
+
+void DeletionQueue::flush()
+{
+	for (size_t i = 0; i < queue.size(); i++)
+	{
+		queue[i]();
+	}
+	queue.clear();
+}

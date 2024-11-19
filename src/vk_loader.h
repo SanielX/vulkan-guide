@@ -18,6 +18,16 @@ struct Mesh
 	GPUMeshBuffers		     meshBuffers;
 };
 
+
+struct DeletionQueue
+{
+	std::vector<std::function<void()>> queue;
+
+	void push(std::function<void()> func);
+
+	void flush();
+};
+
 class VulkanEngine;
 
 std::optional<std::vector<std::shared_ptr<Mesh>>> loadGltfMeshes(VulkanEngine* engine, std::filesystem::path filePath);

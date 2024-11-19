@@ -17,6 +17,9 @@ struct FrameData
 	VkSemaphore swapchain_semaphore;
 	VkSemaphore render_semaphore;
 
+	DescriptorAllocatorGrowable frame_descriptors;
+	DeletionQueue delete_queue;
+
 	VkFence		render_fence;
 };
 
@@ -26,6 +29,17 @@ struct ComputePushConstants
 	glm::vec4 data2;
 	glm::vec4 data3;
 	glm::vec4 data4;
+};
+
+struct GPUSceneData
+{
+	glm::mat4 view;
+	glm::mat4 proj;
+	glm::mat4 viewProj;
+	glm::vec4 ambientColor;
+	glm::vec3 sunlightDirection;
+	float     sunLightStrength;
+	glm::vec4 sunlightColor;
 };
 
 struct ComputeShader
@@ -69,7 +83,7 @@ public:
 	void destroy_swapchain();
 
 	GraphicsBuffer create_graphics_buffer(size_t allocSize, VkBufferUsageFlags usageFlags, VmaMemoryUsage memoryUsage);
-	void		   destroy_graphics_buffer(GraphicsBuffer *buffer);
+	void		   destroy_graphics_buffer(const GraphicsBuffer *buffer);
 
 	GPUMeshBuffers create_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 
@@ -102,6 +116,9 @@ public:
 	VkFence			imFence;
 	VkCommandBuffer imCommandBuffer;
 	VkCommandPool   imCommandPool;
+
+	GPUSceneData		  sceneData;
+	VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
 
 	std::vector<ComputeShader> backgroundShaders;
 	int currentBackgroundShader = 0;

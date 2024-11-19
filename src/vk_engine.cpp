@@ -233,29 +233,34 @@ void VulkanEngine::init_descriptors()
     drawImageDescriptorLayout = layoutBuilder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
 
     // Create pool of descriptors we can allocate from. 
-    std::vector<DescriptorAllocator::PoolSizeRatio> sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 } };
+    std::vector<DescriptorAllocator::PoolSizeRatio> sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 } };
     descriptorAllocator.init_pool(device, 10, sizes);
 
     // Allocate actual descriptor. Or type image will hold ptr to the image and view (size, mip levels etc)
     drawImageDescriptorSet = descriptorAllocator.allocate(device, drawImageDescriptorLayout);
 
-    // Populate the descriptor
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageInfo.imageView   = drawImage.imageView;
-    
-    // Create a write operation,
-    VkWriteDescriptorSet drawImageWrite{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .pNext = nullptr };
-    drawImageWrite.dstSet          = drawImageDescriptorSet; // for given descriptor set
-    drawImageWrite.dstBinding      = 0;                      // at given binding   
-    drawImageWrite.descriptorCount = 1;                      // We set 1 descriptor
-    drawImageWrite.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; // of type image
-    drawImageWrite.pImageInfo      = &imageInfo;                       // and because of that we pass 1 imageInfo there
+    DescriptorWriter writer{};
+    writer.write_image(0, drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    writer.update_set(device, drawImageDescriptorSet);
 
-    vkUpdateDescriptorSets(device, 1, &drawImageWrite, 0, nullptr);
-    /* globalDescriptorAllocator.destroy_pool(_device);
+    for (int i = 0; i < FRAME_OVERLAP; i++)
+    {
+        std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = {
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  3 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
+        };
 
-		vkDestroyDescriptorSetLayout(_device, _drawImageDescriptorLayout, nullptr); */
+        frames[i].frame_descriptors = DescriptorAllocatorGrowable{};
+        frames[i].frame_descriptors.init_pool(device, 1000, frame_sizes);
+    }
+
+    {
+        DescriptorLayoutBuilder builder{};
+        builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        gpuSceneDataDescriptorLayout = builder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
 }
 
 void VulkanEngine::init_pipelines()
@@ -540,7 +545,7 @@ GraphicsBuffer VulkanEngine::create_graphics_buffer(size_t allocSize, VkBufferUs
     return result;
 }
 
-void VulkanEngine::destroy_graphics_buffer(GraphicsBuffer* buffer)
+void VulkanEngine::destroy_graphics_buffer(const GraphicsBuffer* buffer)
 {
     vmaDestroyBuffer(allocator, buffer->buffer, buffer->allocation);
 }
@@ -619,6 +624,19 @@ void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
     // Defines which color+depth+stencil images are bounds to the graphics pipeline
     VkRenderingInfo renderInfo = vkinit::rendering_info(drawExtent, &colorAttachment, &depthAttachment);
 
+    GraphicsBuffer gpuSceneDataBuffer = create_graphics_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    get_current_frame().delete_queue.push([=, this]() {
+        destroy_graphics_buffer(&gpuSceneDataBuffer);
+    });
+
+    GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+    *sceneUniformData = sceneData;
+
+    VkDescriptorSet globalDescriptor = get_current_frame().frame_descriptors.allocate(device, gpuSceneDataDescriptorLayout);
+    DescriptorWriter writer;
+    writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.update_set(device, globalDescriptor);
+
     vkCmdBeginRendering(cmd, &renderInfo);
   /*  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
 
@@ -670,6 +688,9 @@ void VulkanEngine::draw()
     VK_CHECK(vkWaitForFences(device, 1, &frame.render_fence, true, one_second));
     VK_CHECK(vkResetFences  (device, 1, &frame.render_fence));
 
+    frame.delete_queue.flush();
+    frame.frame_descriptors.clear_descriptors(device);
+    
     uint32_t swapchainImageIndex;
     VkResult swapChainResult = vkAcquireNextImageKHR(device, swapchain, one_second, frame.swapchain_semaphore, nullptr, &swapchainImageIndex);
     if (swapChainResult == VK_ERROR_OUT_OF_DATE_KHR)
@@ -677,6 +698,7 @@ void VulkanEngine::draw()
         _swapChainNeedsResize = true;
         return;
     }
+
 
     VkCommandBuffer cmd = frame.cmd;
     vkResetCommandBuffer(cmd, 0);
