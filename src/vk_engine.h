@@ -82,6 +82,10 @@ public:
 	void create_swapchain(uint32_t w, uint32_t h);
 	void destroy_swapchain();
 
+	Texture create_texture(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool enableMipmap = false);
+	Texture create_texture(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool enableMipmap = false);
+	void    destroy_texture(const Texture& texture);
+
 	GraphicsBuffer create_graphics_buffer(size_t allocSize, VkBufferUsageFlags usageFlags, VmaMemoryUsage memoryUsage);
 	void		   destroy_graphics_buffer(const GraphicsBuffer *buffer);
 
@@ -90,6 +94,11 @@ public:
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)> && function);
 
 	void draw_hello_triangle(VkCommandBuffer cmd);
+
+	Texture whiteTexture, blackTexture, grayTexture, errorTexture;
+
+	VkSampler defaultSamplerLinear;
+	VkSampler defaultSamplerNearest;
 
 	DescriptorAllocator descriptorAllocator;
 
@@ -106,6 +115,8 @@ public:
 	glm::vec3 meshPosition = {};
 	glm::vec3 meshScale    = {1,1,1};
 	glm::mat4 modelMatrix;
+
+	VkDescriptorSetLayout drawMeshSetLayout;
 
 	VkDescriptorSet	      drawImageDescriptorSet;
 	VkDescriptorSetLayout drawImageDescriptorLayout;

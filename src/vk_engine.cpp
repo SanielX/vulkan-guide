@@ -78,6 +78,44 @@ void VulkanEngine::init()
 
     rectangle = create_mesh(rect_indices, rect_vertices);
 
+    uint32_t white = glm::packUnorm4x8(glm::vec4(1, 1, 1, 1));
+    whiteTexture = create_texture((void*)&white, VkExtent3D{ 1,1,1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    uint32_t black = glm::packUnorm4x8(glm::vec4(0, 0, 0, 1));
+    blackTexture = create_texture((void*)&black, VkExtent3D{ 1,1,1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    uint32_t gray = glm::packUnorm4x8(glm::vec4(0.5, 0.5, 0.5, 1));
+    grayTexture = create_texture((void*)&black, VkExtent3D{ 1,1,1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    uint32_t magenta = glm::packUnorm4x8(glm::vec4(1, 0, 1, 1));
+    std::array<uint32_t, 16 * 16> errorPixels;
+    for (size_t x = 0; x < 16; x++)
+    {
+        for (size_t y = 0; y < 16; y++)
+        {
+            errorPixels[y * 16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+        }
+    }
+
+    errorTexture = create_texture(errorPixels.data(), VkExtent3D{ 16, 16, 1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    VkSamplerCreateInfo samplerCreateInfo{ .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .pNext = nullptr };
+
+    samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+    samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+    samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+    samplerCreateInfo.mipLodBias   = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+    vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultSamplerLinear);
+
+    samplerCreateInfo.minFilter = VK_FILTER_NEAREST;
+    samplerCreateInfo.magFilter = VK_FILTER_NEAREST;
+    samplerCreateInfo.mipLodBias = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+    vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultSamplerNearest);
+
     // everything went fine
     _isInitialized = true;
 }
@@ -233,7 +271,7 @@ void VulkanEngine::init_descriptors()
     drawImageDescriptorLayout = layoutBuilder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
 
     // Create pool of descriptors we can allocate from. 
-    std::vector<DescriptorAllocator::PoolSizeRatio> sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 } };
+    std::vector<DescriptorAllocator::PoolSizeRatio> sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10 } };
     descriptorAllocator.init_pool(device, 10, sizes);
 
     // Allocate actual descriptor. Or type image will hold ptr to the image and view (size, mip levels etc)
@@ -355,7 +393,15 @@ void VulkanEngine::init_mesh_pipelines()
     bufferRange.size = sizeof(MeshDrawPushConstants);
     bufferRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+    DescriptorLayoutBuilder layoutBuilder{};
+    layoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+    drawMeshSetLayout = layoutBuilder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT); 
+
     VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
+    pipeline_layout_info.pSetLayouts    = &drawMeshSetLayout;
+    pipeline_layout_info.setLayoutCount = 1;
+
     pipeline_layout_info.pPushConstantRanges    = &bufferRange;
     pipeline_layout_info.pushConstantRangeCount = 1;
 
@@ -658,6 +704,13 @@ void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
+    VkDescriptorSet meshDescSet = get_current_frame().frame_descriptors.allocate(device, drawMeshSetLayout);
+    DescriptorWriter writer2;
+    writer2.write_image(0, errorTexture.imageView, defaultSamplerNearest, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer2.update_set(device, meshDescSet);
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipelineLayout, 0, 1, &meshDescSet, 0, nullptr);
+
     Mesh* targetMesh = testMeshes[currentMesh].get();
 
     MeshDrawPushConstants meshConstants;
@@ -912,4 +965,67 @@ void TRS(glm::vec3 t, glm::quat r, glm::vec3 s, glm::mat4& res)
     float m44 = 1.0f;
 
     res = glm::transpose(glm::mat4{ m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44 });
+}
+
+Texture VulkanEngine::create_texture(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool enableMipmap)
+{
+    Texture newTexture;
+    newTexture.format = format;
+    newTexture.extent = size;
+
+    VkImageCreateInfo imgInfo = vkinit::image_create_info(format, usage, size);
+    if (enableMipmap)
+    {
+        imgInfo.mipLevels = std::floor(std::log2(std::max(size.width, size.height))) + 1;
+    }
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    allocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vmaCreateImage(allocator, &imgInfo, &allocInfo, &newTexture.image, &newTexture.allocation, nullptr);
+
+    VkImageAspectFlags aspectFlag = format == VK_FORMAT_D32_SFLOAT? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    
+    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(format, newTexture.image, aspectFlag);
+    view_info.subresourceRange.levelCount = imgInfo.mipLevels;
+    vkCreateImageView(device, &view_info, nullptr, &newTexture.imageView);
+    return newTexture;
+}
+
+Texture VulkanEngine::create_texture(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool enableMipmap)
+{
+    const size_t pixelSize = 4;
+
+    size_t dataSize = size.depth * size.width * size.height * pixelSize; // size of mip0 only
+    GraphicsBuffer stagingBuffer = create_graphics_buffer(dataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    memcpy(stagingBuffer.allocInfo.pMappedData, data, dataSize);
+
+    Texture texture = create_texture(size, format, usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, enableMipmap);
+
+    immediate_submit([&](VkCommandBuffer cmd)
+        {
+            vkutil::transition_image(cmd, texture.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            VkBufferImageCopy copy{};
+            copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copy.imageSubresource.mipLevel   = 0;
+            copy.imageSubresource.layerCount = 1;
+            copy.imageExtent = size;
+
+            vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+            vkutil::transition_image(cmd, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        });
+
+    destroy_graphics_buffer(&stagingBuffer);
+
+    return texture;
+}
+
+void VulkanEngine::destroy_texture(const Texture& texture)
+{
+    vkDestroyImageView(device, texture.imageView, nullptr);
+    vmaDestroyImage(allocator, texture.image, texture.allocation);
 }

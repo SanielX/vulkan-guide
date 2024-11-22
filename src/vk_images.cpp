@@ -1,7 +1,7 @@
 #include <vk_images.h>
 
-namespace vkutil {
-
+namespace vkutil 
+{
 	void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout)
 	{
 		VkImageMemoryBarrier2 imageBarrier{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };

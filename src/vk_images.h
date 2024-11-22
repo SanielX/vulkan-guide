@@ -2,8 +2,8 @@
 #pragma once 
 #include "vk_initializers.h"
 
-namespace vkutil {
-
+namespace vkutil 
+{
 	void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
 	void transition_image_depth(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
 
