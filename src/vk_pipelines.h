@@ -27,6 +27,7 @@ namespace vkutil
 		void set_depth_format(VkFormat format);
 		void disable_depth_test();
 		void set_depth_test();
+		void set_depth_test(bool enabled, VkCompareOp compareOp);
 		void clear();
 
 		void set_alpha_blend(VkBlendOp op, VkBlendFactor srcFactor, VkBlendFactor dstFactor);

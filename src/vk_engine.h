@@ -52,9 +52,79 @@ struct ComputeShader
 	ComputePushConstants data;
 };
 
-class VulkanEngine {
-public:
+enum class MaterialPass
+{
+	Opaque, Transparent
+};
 
+struct MaterialPipeline
+{
+	VkPipeline		 pipeline;
+	VkPipelineLayout pipelineLayout;
+};
+
+struct MaterialInstance
+{
+	MaterialPipeline* pipeline;
+	VkDescriptorSet   descriptorSet;
+	MaterialPass      type;
+};
+
+struct RenderObject
+{
+	uint32_t indexCount;
+	uint32_t firstIndex;
+	VkBuffer indexBuffer;
+
+	MaterialInstance* material;
+
+	glm::mat4	    transform;
+	VkDeviceAddress vertexBufferPtr;
+};
+
+struct DrawContext {};
+
+class IRenderable 
+{
+	virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
+};
+
+struct GltfPbrMaterialDescriptor
+{
+	MaterialPipeline opaquePipeline;
+	MaterialPipeline transparentPipeline;
+
+	VkDescriptorSetLayout materialLayout;
+
+	struct MaterialConstants
+	{
+		glm::vec4 colorFactors;
+		glm::vec4 metal_rough_factors;
+
+		glm::vec4 pad[14];
+	};
+
+	struct MaterialResources
+	{
+		Texture   albedoTexture;
+		VkSampler albedoSampler;
+
+		Texture   maskTexture;
+		VkSampler maskSampler;
+
+		VkBuffer dataBuffer;
+		uint32_t dataBufferOffset;
+	};
+
+	DescriptorWriter writer;
+
+	void build_pipelines(VulkanEngine* engine);
+	void clear_resources(VkDevice device);
+
+	MaterialInstance create_instance(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
+};
+
+struct VulkanEngine {
 	//initializes everything in the engine
 	void init();
 
@@ -75,7 +145,6 @@ public:
 	void init_descriptors();
 	void init_pipelines();
 	void init_mesh_pipelines();
-	void init_triangle_pipeline();
 	void init_imgui();
 
 	void resize_swapchain(uint32_t w, uint32_t h);
@@ -97,13 +166,13 @@ public:
 
 	Texture whiteTexture, blackTexture, grayTexture, errorTexture;
 
+	MaterialInstance	   defaultMaterial;
+	GltfPbrMaterialDescriptor metalRoughMaterial; // material descriptor would be a better name tbh
+
 	VkSampler defaultSamplerLinear;
 	VkSampler defaultSamplerNearest;
 
-	DescriptorAllocator descriptorAllocator;
-
-	VkPipelineLayout trianglePipelineLayout;
-	VkPipeline trianglePipeline;
+	DescriptorAllocatorGrowable descriptorAllocator;
 
 	VkPipelineLayout meshPipelineLayout;
 	VkPipeline       meshPipeline;

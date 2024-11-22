@@ -51,8 +51,9 @@ void VulkanEngine::init()
     init_descriptors();
     init_pipelines();
     init_imgui();
-    init_triangle_pipeline();
     init_mesh_pipelines();
+
+    metalRoughMaterial.build_pipelines(this);
 
     testMeshes = loadGltfMeshes(this, "../../assets/basicmesh.glb").value();
 
@@ -115,6 +116,24 @@ void VulkanEngine::init()
     samplerCreateInfo.mipLodBias = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
     vkCreateSampler(device, &samplerCreateInfo, nullptr, &defaultSamplerNearest);
+
+    GltfPbrMaterialDescriptor::MaterialResources materialResources;
+    materialResources.albedoTexture = whiteTexture;
+    materialResources.albedoSampler = defaultSamplerLinear;
+
+    materialResources.maskTexture = whiteTexture;
+    materialResources.maskSampler = defaultSamplerLinear;
+
+    GraphicsBuffer materialConstants = create_graphics_buffer(sizeof(GltfPbrMaterialDescriptor::MaterialConstants), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    GltfPbrMaterialDescriptor::MaterialConstants* sceneUniformData = (GltfPbrMaterialDescriptor::MaterialConstants*)materialConstants.allocation->GetMappedData();
+    sceneUniformData->colorFactors        = glm::vec4(1, 1, 1, 1);
+    sceneUniformData->metal_rough_factors = glm::vec4(1, 0.5, 0.0, 0.0);
+
+    materialResources.dataBuffer = materialConstants.buffer;
+    materialResources.dataBufferOffset = 0;
+
+    defaultMaterial = metalRoughMaterial.create_instance(device, MaterialPass::Opaque, materialResources, descriptorAllocator);
 
     // everything went fine
     _isInitialized = true;
@@ -271,7 +290,11 @@ void VulkanEngine::init_descriptors()
     drawImageDescriptorLayout = layoutBuilder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
 
     // Create pool of descriptors we can allocate from. 
-    std::vector<DescriptorAllocator::PoolSizeRatio> sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10 } };
+    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes = { 
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 100 }, 
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 }, 
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100 } 
+    };
     descriptorAllocator.init_pool(device, 10, sizes);
 
     // Allocate actual descriptor. Or type image will hold ptr to the image and view (size, mip levels etc)
@@ -422,42 +445,6 @@ void VulkanEngine::init_mesh_pipelines()
 
     vkDestroyShaderModule(device, fragModule, nullptr);
     vkDestroyShaderModule(device, vertModule, nullptr);
-}
-
-void VulkanEngine::init_triangle_pipeline()
-{
-    VkShaderModule fragModule;
-    bool result = vkutil::load_shader_module("../../shaders/colored_triangle.frag.spv", device, &fragModule);
-    if (!result) throw std::exception("Failed to load colored_triangle.frag");
-
-    VkShaderModule vertModule;
-    result = vkutil::load_shader_module("../../shaders/colored_triangle.vert.spv", device, &vertModule);
-    if (!result) throw std::exception("Failed to load colored_triangle.vert.spv");
-
-    VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
-    vkCreatePipelineLayout(device, &pipeline_layout_info, nullptr, &trianglePipelineLayout);
-
-    vkutil::GraphicsPipelineBuilder builder;
-    vkutil::GraphicsPipelineBuilder::create(&builder);
-
-    builder.pipelineLayout = trianglePipelineLayout;
-    builder.set_shaders(vertModule, fragModule);
-    builder.set_cull_mode(VK_CULL_MODE_BACK_BIT);
-    builder.disable_depth_test();
-    builder.set_color_attachment_format(drawImage.format);
-    builder.set_depth_format(VK_FORMAT_UNDEFINED);
-    builder.set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-
-    trianglePipeline = builder.build_pipeline(device);
-
-    vkDestroyShaderModule(device, fragModule, nullptr);
-    vkDestroyShaderModule(device, vertModule, nullptr);
-    /* pretend to clean up
-    _mainDeletionQueue.push_function([&]() {
-		vkDestroyPipelineLayout(_device, _trianglePipelineLayout, nullptr);
-		vkDestroyPipeline(_device, _trianglePipeline, nullptr);
-	});
-    */
 }
 
 void VulkanEngine::init_imgui()
@@ -1028,4 +1015,88 @@ void VulkanEngine::destroy_texture(const Texture& texture)
 {
     vkDestroyImageView(device, texture.imageView, nullptr);
     vmaDestroyImage(allocator, texture.image, texture.allocation);
+}
+
+void GltfPbrMaterialDescriptor::build_pipelines(VulkanEngine* engine)
+{
+    VkShaderModule meshFragShader;
+    if (!vkutil::load_shader_module("../../shaders/pbr_mesh.frag.spv", engine->device, &meshFragShader))
+    {
+        fmt::print("Error while loading mesh.frag shader");
+    }
+
+    VkShaderModule meshVertShader;
+    if (!vkutil::load_shader_module("../../shaders/pbr_mesh.vert.spv", engine->device, &meshVertShader))
+    {
+        fmt::print("Error while loading mesh.vert shader");
+    }
+
+    VkPushConstantRange matrixRange{};
+    matrixRange.size       = sizeof(MeshDrawPushConstants);
+    matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    DescriptorLayoutBuilder layoutBuilder;
+    layoutBuilder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    layoutBuilder.add_binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    layoutBuilder.add_binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+    this->materialLayout = layoutBuilder.build(engine->device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkDescriptorSetLayout layouts[] = { engine->gpuSceneDataDescriptorLayout, materialLayout };
+    
+    VkPipelineLayoutCreateInfo meshPipelineInfo = vkinit::pipeline_layout_create_info();
+    meshPipelineInfo.setLayoutCount = 2;
+    meshPipelineInfo.pSetLayouts    = layouts;
+
+    meshPipelineInfo.pPushConstantRanges    = &matrixRange;
+    meshPipelineInfo.pushConstantRangeCount = 1;
+
+    VkPipelineLayout newLayout;
+    vkCreatePipelineLayout(engine->device, &meshPipelineInfo, nullptr, &newLayout);
+
+    vkutil::GraphicsPipelineBuilder pipelineBuilder{};
+    vkutil::GraphicsPipelineBuilder::create(&pipelineBuilder);
+
+    pipelineBuilder.set_shaders(meshVertShader, meshFragShader);
+    pipelineBuilder.set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
+    pipelineBuilder.set_depth_test();
+    
+    pipelineBuilder.set_color_attachment_format(engine->drawImage.format);
+    pipelineBuilder.set_depth_format(engine->drawDepthBuffer.format);
+
+    pipelineBuilder.pipelineLayout = newLayout;
+
+    opaquePipeline.pipeline = pipelineBuilder.build_pipeline(engine->device);
+
+    pipelineBuilder.set_alpha_blend(VK_BLEND_OP_ADD, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+    pipelineBuilder.set_depth_test(false, VK_COMPARE_OP_GREATER_OR_EQUAL);
+
+    transparentPipeline.pipeline = pipelineBuilder.build_pipeline(engine->device);
+
+    vkDestroyShaderModule(engine->device, meshFragShader, nullptr);
+    vkDestroyShaderModule(engine->device, meshVertShader, nullptr);
+}
+
+void GltfPbrMaterialDescriptor::clear_resources(VkDevice device) 
+{
+}
+
+MaterialInstance GltfPbrMaterialDescriptor::create_instance(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator)
+{
+    MaterialInstance instance;
+    instance.type = pass;
+
+    if (pass == MaterialPass::Opaque) { instance.pipeline = &transparentPipeline; }
+    else { instance.pipeline = &opaquePipeline; }
+
+    instance.descriptorSet = descriptorAllocator.allocate(device, materialLayout);
+
+    writer.clear();
+    writer.write_buffer(0, resources.dataBuffer, sizeof(MaterialConstants), resources.dataBufferOffset, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    writer.write_image(1, resources.albedoTexture.imageView, resources.albedoSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.write_image(1, resources.maskTexture.imageView, resources.maskSampler,     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+    writer.update_set(device, instance.descriptorSet);
+    return instance;
 }

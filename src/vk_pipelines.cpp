@@ -96,14 +96,18 @@ void vkutil::GraphicsPipelineBuilder::disable_depth_test()
 
 void vkutil::GraphicsPipelineBuilder::set_depth_test()
 {
+	set_depth_test(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
+}
+
+void vkutil::GraphicsPipelineBuilder::set_depth_test(bool depthWrite, VkCompareOp compareOp)
+{
 	depthStencil.depthTestEnable       = VK_TRUE;
-	depthStencil.depthCompareOp		   = VK_COMPARE_OP_GREATER_OR_EQUAL;
-	depthStencil.depthWriteEnable      = VK_TRUE;
+	depthStencil.depthCompareOp        = compareOp;
+	depthStencil.depthWriteEnable      = depthWrite? VK_TRUE : VK_FALSE;
 	depthStencil.depthBoundsTestEnable = VK_TRUE;
 
 	depthStencil.minDepthBounds = 0.f;
 	depthStencil.maxDepthBounds = 1.f;
-	set_cull_mode(VK_CULL_MODE_FRONT_BIT);
 }
 
 void vkutil::GraphicsPipelineBuilder::clear()
@@ -133,7 +137,7 @@ void vkutil::GraphicsPipelineBuilder::clear()
 
 	set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 	set_polygon_mode(VK_POLYGON_MODE_FILL);
-	set_cull_mode(VK_CULL_MODE_BACK_BIT);
+	set_cull_mode(VK_CULL_MODE_FRONT_BIT);
 }
 
 void vkutil::GraphicsPipelineBuilder::set_alpha_blend(VkBlendOp op, VkBlendFactor srcFactor = VK_BLEND_FACTOR_ONE, VkBlendFactor dstFactor = VK_BLEND_FACTOR_ZERO)
