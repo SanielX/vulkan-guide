@@ -103,7 +103,7 @@ void vkutil::GraphicsPipelineBuilder::set_depth_test(bool depthWrite, VkCompareO
 {
 	depthStencil.depthTestEnable       = VK_TRUE;
 	depthStencil.depthCompareOp        = compareOp;
-	depthStencil.depthWriteEnable      = depthWrite? VK_TRUE : VK_FALSE;
+	depthStencil.depthWriteEnable      = depthWrite;
 	depthStencil.depthBoundsTestEnable = VK_TRUE;
 
 	depthStencil.minDepthBounds = 0.f;

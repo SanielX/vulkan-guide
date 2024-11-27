@@ -4,10 +4,13 @@
 #include <unordered_map>
 #include <filesystem>
 
+struct MaterialInstance;
+
 struct MeshSurface
 {
 	uint32_t startIndex;
 	uint32_t count;
+	std::shared_ptr<MaterialInstance> material;
 };
 
 struct Mesh

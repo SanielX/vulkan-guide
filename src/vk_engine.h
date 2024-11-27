@@ -79,14 +79,12 @@ struct RenderObject
 	MaterialInstance* material;
 
 	glm::mat4	    transform;
-	VkDeviceAddress vertexBufferPtr;
+	VkDeviceAddress vertexBufferAddress;
 };
 
-struct DrawContext {};
-
-class IRenderable 
+struct DrawContext 
 {
-	virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
+	std::vector<RenderObject> OpaqueSurfaces;
 };
 
 struct GltfPbrMaterialDescriptor
@@ -151,6 +149,8 @@ struct VulkanEngine {
 	void create_swapchain(uint32_t w, uint32_t h);
 	void destroy_swapchain();
 
+	void update_scene();
+
 	Texture create_texture(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool enableMipmap = false);
 	Texture create_texture(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool enableMipmap = false);
 	void    destroy_texture(const Texture& texture);
@@ -168,6 +168,9 @@ struct VulkanEngine {
 
 	MaterialInstance	   defaultMaterial;
 	GltfPbrMaterialDescriptor metalRoughMaterial; // material descriptor would be a better name tbh
+
+	DrawContext mainDrawContext;
+	std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
 
 	VkSampler defaultSamplerLinear;
 	VkSampler defaultSamplerNearest;
@@ -239,4 +242,11 @@ struct VulkanEngine {
 	FrameData& get_current_frame() { return frames[frame_count % FRAME_OVERLAP]; }
 
 	struct SDL_Window* _window{ nullptr };
+};
+
+struct MeshNode : public Node
+{
+	std::shared_ptr<Mesh> mesh;
+
+	virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
 };

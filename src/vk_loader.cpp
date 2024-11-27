@@ -45,6 +45,8 @@ std::optional<std::vector<std::shared_ptr<Mesh>>> loadGltfMeshes(VulkanEngine* e
 	for (fastgltf::Mesh& mesh : gltf.meshes)
 	{
 		Mesh newmesh;
+		newmesh.name = mesh.name;
+
 		indices.clear();
 		vertices.clear();
 	
@@ -118,7 +120,7 @@ std::optional<std::vector<std::shared_ptr<Mesh>>> loadGltfMeshes(VulkanEngine* e
 		}
 	
 		// display the vertex normals
-		constexpr bool OverrideColors = true;
+		constexpr bool OverrideColors = false;
 		if (OverrideColors) {
 			for (Vertex& vtx : vertices) {
 				vtx.color = glm::vec4(vtx.normal * 0.5f + 0.5f, 1.f);

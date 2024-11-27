@@ -24,6 +24,23 @@
 
 VulkanEngine* loadedEngine = nullptr;
 
+
+void Node::refreshTransform(const glm::mat4& parentMatrix)
+{
+    worldTransform = parentMatrix * localTransform;
+    for (auto c : children) {
+        c->refreshTransform(worldTransform);
+    }
+}
+
+void Node::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
+{
+    for (auto& c : children)
+    {
+        c->Draw(topMatrix, ctx);
+    }
+}
+
 VulkanEngine& VulkanEngine::Get() { return *loadedEngine; }
 void VulkanEngine::init()
 {
@@ -134,6 +151,21 @@ void VulkanEngine::init()
     materialResources.dataBufferOffset = 0;
 
     defaultMaterial = metalRoughMaterial.create_instance(device, MaterialPass::Opaque, materialResources, descriptorAllocator);
+
+    for (std::shared_ptr<Mesh>& mesh : testMeshes)
+    {
+        std::shared_ptr<MeshNode> newNode = std::make_shared<MeshNode>();
+        newNode->mesh = mesh;
+        newNode->localTransform = glm::mat4{ 1.f };
+        newNode->worldTransform = glm::mat4{ 1.f };
+
+        for (MeshSurface& surface : mesh->surfaces)
+        {
+            surface.material = std::make_shared<MaterialInstance>(defaultMaterial);
+        }
+
+        loadedNodes[mesh->name] = std::move(newNode);
+    }
 
     // everything went fine
     _isInitialized = true;
@@ -561,6 +593,23 @@ void VulkanEngine::destroy_swapchain()
     }
 }
 
+void VulkanEngine::update_scene()
+{
+    loadedNodes["Suzanne"]->Draw(glm::mat4{ 1.f }, mainDrawContext);
+
+    sceneData.view = glm::translate(glm::vec3{ 0,0,-5 });
+
+    float aspect = (float)_windowExtent.width / (float)_windowExtent.height;
+    sceneData.proj = glm::perspective(glm::radians(74.f), aspect, 1000.0f, 0.1f);
+
+    sceneData.proj[1][1] *= -1;
+    sceneData.viewProj = sceneData.proj * sceneData.view;
+
+    sceneData.ambientColor = glm::vec4(.1);
+    sceneData.sunlightColor = glm::vec4(1.f);
+    sceneData.sunlightDirection = glm::vec4(0, 1, 0.5, 1.f);
+}
+
 GraphicsBuffer VulkanEngine::create_graphics_buffer(size_t allocSize, VkBufferUsageFlags usageFlags, VmaMemoryUsage memoryUsage)
 {
     GraphicsBuffer result{};
@@ -671,11 +720,7 @@ void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
     writer.update_set(device, globalDescriptor);
 
     vkCmdBeginRendering(cmd, &renderInfo);
-  /*  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
 
-    // cmd, vertex count, instance count, first vertex, first index
-    vkCmdDraw(cmd, 3, 1, 0, 0);
-  */
     VkViewport viewport{};
     viewport.width  = drawExtent.width;
     viewport.height = drawExtent.height;
@@ -689,30 +734,23 @@ void VulkanEngine::draw_hello_triangle(VkCommandBuffer cmd)
     scissor.extent.height = drawExtent.height;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+    for (const RenderObject& draw : mainDrawContext.OpaqueSurfaces)
+    {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipelineLayout, 0, 1, &globalDescriptor, 0, nullptr);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipelineLayout, 1, 1, &draw.material->descriptorSet, 0, nullptr);
 
-    VkDescriptorSet meshDescSet = get_current_frame().frame_descriptors.allocate(device, drawMeshSetLayout);
-    DescriptorWriter writer2;
-    writer2.write_image(0, errorTexture.imageView, defaultSamplerNearest, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    writer2.update_set(device, meshDescSet);
+        vkCmdBindIndexBuffer(cmd, draw.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipelineLayout, 0, 1, &meshDescSet, 0, nullptr);
+        MeshDrawPushConstants drawConstants;
+        drawConstants.vertexBuffer = draw.vertexBufferAddress;
+        drawConstants.worldMatrix  = draw.transform;
+        vkCmdPushConstants(cmd, draw.material->pipeline->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshDrawPushConstants), &drawConstants);
 
-    Mesh* targetMesh = testMeshes[currentMesh].get();
+        vkCmdDrawIndexed(cmd, draw.indexCount, 1, draw.firstIndex, 0, 0);
+    }
 
-    MeshDrawPushConstants meshConstants;
-     
-    glm::mat4 view = glm::translate  (glm::identity<glm::mat4>(), glm::vec3{ 0, 0, -5.f });
-    glm::mat4 proj = glm::perspective(glm::radians(70.f), (float)drawExtent.width / float(drawExtent.height), 1000.f, 0.1f);
-    proj[1][1] *= -1;
-    meshConstants.modelMatrix  = modelMatrix;
-    meshConstants.worldMatrix  = proj*view;
-    meshConstants.vertexBuffer = targetMesh->meshBuffers.vertexBufferAddress;
-
-    vkCmdPushConstants(cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshDrawPushConstants), &meshConstants);
-    vkCmdBindIndexBuffer(cmd, targetMesh->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-    vkCmdDrawIndexed(cmd, targetMesh->surfaces[0].count, 1, targetMesh->surfaces[0].startIndex, 0, 0);
+    mainDrawContext.OpaqueSurfaces.clear();
 
     vkCmdEndRendering(cmd);
 }
@@ -807,8 +845,8 @@ void VulkanEngine::draw()
 
     VkCommandBufferSubmitInfo cmdinfo = vkinit::command_buffer_submit_info(cmd);
 
-    VkSemaphoreSubmitInfo waitInfo   = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame().swapchain_semaphore);
     VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame().render_semaphore);
+    VkSemaphoreSubmitInfo waitInfo   = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame().swapchain_semaphore);
 
     VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, &signalInfo, &waitInfo);
 
@@ -903,7 +941,10 @@ void VulkanEngine::run()
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL2_NewFrame();
+
         ImGui::NewFrame();
+
+        update_scene();
 
         ImGui::ShowDemoWindow();
         
@@ -1060,19 +1101,22 @@ void GltfPbrMaterialDescriptor::build_pipelines(VulkanEngine* engine)
     pipelineBuilder.set_shaders(meshVertShader, meshFragShader);
     pipelineBuilder.set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
-    pipelineBuilder.set_depth_test();
+    pipelineBuilder.set_cull_mode(VK_CULL_MODE_FRONT_BIT);
     
     pipelineBuilder.set_color_attachment_format(engine->drawImage.format);
     pipelineBuilder.set_depth_format(engine->drawDepthBuffer.format);
+    pipelineBuilder.set_depth_test();
 
     pipelineBuilder.pipelineLayout = newLayout;
 
     opaquePipeline.pipeline = pipelineBuilder.build_pipeline(engine->device);
+    opaquePipeline.pipelineLayout = newLayout;
 
     pipelineBuilder.set_alpha_blend(VK_BLEND_OP_ADD, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
     pipelineBuilder.set_depth_test(false, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
     transparentPipeline.pipeline = pipelineBuilder.build_pipeline(engine->device);
+    transparentPipeline.pipelineLayout = newLayout;
 
     vkDestroyShaderModule(engine->device, meshFragShader, nullptr);
     vkDestroyShaderModule(engine->device, meshVertShader, nullptr);
@@ -1087,8 +1131,8 @@ MaterialInstance GltfPbrMaterialDescriptor::create_instance(VkDevice device, Mat
     MaterialInstance instance;
     instance.type = pass;
 
-    if (pass == MaterialPass::Opaque) { instance.pipeline = &transparentPipeline; }
-    else { instance.pipeline = &opaquePipeline; }
+    if (pass == MaterialPass::Opaque) { instance.pipeline = &opaquePipeline; }
+    else { instance.pipeline = &transparentPipeline; }
 
     instance.descriptorSet = descriptorAllocator.allocate(device, materialLayout);
 
@@ -1099,4 +1143,35 @@ MaterialInstance GltfPbrMaterialDescriptor::create_instance(VkDevice device, Mat
 
     writer.update_set(device, instance.descriptorSet);
     return instance;
+}
+
+
+void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
+{
+    glm::mat4 nodeMatrix = VulkanEngine::Get().modelMatrix; // topMatrix* worldTransform;
+
+    if (mesh)
+    {
+        for (int i = 0; i < mesh->surfaces.size(); ++i)
+        {
+            RenderObject obj{};
+            MeshSurface surface = mesh->surfaces[i];
+
+            obj.firstIndex = surface.startIndex;
+            obj.indexCount = surface.count;
+            obj.material   = surface.material.get();
+
+            obj.transform = nodeMatrix;
+
+            obj.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
+            obj.indexBuffer     = mesh->meshBuffers.indexBuffer.buffer;
+
+            ctx.OpaqueSurfaces.push_back(obj);
+        }
+    }
+
+    for (auto& c : children)
+    {
+        c->Draw(topMatrix, ctx);
+    }
 }

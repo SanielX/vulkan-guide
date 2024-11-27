@@ -58,9 +58,28 @@ struct GPUMeshBuffers
 struct MeshDrawPushConstants
 {
     glm::mat4       worldMatrix;
-    glm::mat4       modelMatrix;
     VkDeviceAddress vertexBuffer;
 };
+
+struct DrawContext;
+
+class IRenderable
+{
+    virtual void Draw(const glm::mat4& matrix, DrawContext& ctx) = 0;
+};
+
+struct Node : public IRenderable
+{
+    std::weak_ptr<Node>                parent;
+    std::vector<std::shared_ptr<Node>> children;
+
+    glm::mat4 localTransform;
+    glm::mat4 worldTransform;
+
+    void refreshTransform(const glm::mat4& parentMatrix);
+    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx);
+};
+
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \
